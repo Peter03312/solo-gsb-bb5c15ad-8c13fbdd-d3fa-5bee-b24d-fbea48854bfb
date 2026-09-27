@@ -47,6 +47,7 @@
         seamWidth: input.seamWidth,
         zones: (input.zones || []).map((z) => ({ start: z.start, end: z.end })),
         detents: input.detents || { enabled: false },
+        tolerance: input.tolerance || null,
       },
       result,
     };

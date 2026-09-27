@@ -55,6 +55,22 @@
           <p class="hint" id="detentsHint">启用后仅允许“偏移 + n×360°/档位数”的角度，单/多规格共用此约束</p>
         </div>
 
+        <div class="detents-box tolerance-box">
+          <label class="detents-toggle">
+            <input id="toleranceEnabled" type="checkbox" />
+            <span>启用安装误差分析</span>
+          </label>
+          <div id="toleranceFields" class="detents-fields" hidden>
+            <label>逆时针误差 (°)
+              <input id="tolCcw" type="number" min="0" step="any" value="0" />
+            </label>
+            <label>顺时针误差 (°)
+              <input id="tolCw" type="number" min="0" step="any" value="0" />
+            </label>
+          </div>
+          <p class="hint">标称角度 θ 可靠 ⟺ 从 θ−逆时针误差 到 θ+顺时针误差 的整条圆弧均安全（含边界）</p>
+        </div>
+
         <h3>印刷保护区 (mm)<button id="addZone" type="button" class="small">+ 添加</button></h3>
         <div id="zones"></div>
 
@@ -124,6 +140,12 @@
           <h3>可用档位 <span id="singleDetentCount" class="hint"></span></h3>
           <ul id="singleDetentList" class="detent-list"></ul>
         </div>
+        <div id="singleTolerancePanel" class="tolerance-panel" hidden>
+          <h3>安装误差分析 <span id="singleToleranceInfo" class="hint"></span></h3>
+          <div id="singleToleranceEmpty" class="tol-empty" hidden></div>
+          <ul id="singleToleranceList" class="seg-list"></ul>
+          <div id="singleToleranceDetents" class="tol-detents" hidden></div>
+        </div>
         <h3>可行角度段 <span id="feasibleCount" class="hint"></span></h3>
         <ul id="feasibleList" class="seg-list"></ul>
         <h3>禁用区间（合并后）</h3>
@@ -138,6 +160,12 @@
         <div id="multiDetentsPanel" class="detents-panel" hidden>
           <h3>可用档位 <span id="multiDetentCount" class="hint"></span></h3>
           <ul id="multiDetentList" class="detent-list"></ul>
+        </div>
+        <div id="multiTolerancePanel" class="tolerance-panel" hidden>
+          <h3>安装误差分析 <span id="multiToleranceInfo" class="hint"></span></h3>
+          <div id="multiToleranceEmpty" class="tol-empty" hidden></div>
+          <ul id="multiToleranceList" class="seg-list"></ul>
+          <div id="multiToleranceDetents" class="tol-detents" hidden></div>
         </div>
         <h3>所有规格均安全的角度段 <span id="commonCount" class="hint"></span></h3>
         <ul id="commonList" class="seg-list"></ul>

@@ -26,6 +26,7 @@
 const { computeSeamAvoidance } = require('./seamMath');
 const { parseDetents, analyzeDetents, detentPositions } = require('./detents');
 const { planRoute } = require('./routePlan');
+const { parseTolerance, computeReliableArcs, degInReliable } = require('./tolerance');
 
 const FULL = 360;
 const EPS = 1e-7; // 角度比较容差
@@ -468,8 +469,10 @@ function computeMinViolationFallback(specs, forbiddenSets, detentCfg, blocker) {
  *        {enabled:boolean, steps?:2～360 整数, offsetDeg?:number}
  * @param {object} [routeOpt] 调机旋转路径 {fromDeg, toDeg}（角度，按整圈归一）；
  *        基于共用安全段（启用档位时还要求两端落在可用档位上）规划单向连续旋转路径
+ * @param {object} [toleranceOpt] 安装误差 {ccwDeg, cwDeg}（非负有限角度）；
+ *        给出时基于共用安全段输出可靠角度段；缺省时响应不含 tolerance 字段
  */
-function computeMultiSpec(circumferences, seamWidth, zones, detentsOpt, routeOpt) {
+function computeMultiSpec(circumferences, seamWidth, zones, detentsOpt, routeOpt, toleranceOpt) {
   if (
     !Array.isArray(circumferences) ||
     circumferences.length < MIN_SPECS ||
@@ -641,7 +644,7 @@ function computeMultiSpec(circumferences, seamWidth, zones, detentsOpt, routeOpt
     );
   }
 
-  return {
+  const result = {
     mode: 'multi',
     seamWidth,
     specs,
@@ -654,6 +657,34 @@ function computeMultiSpec(circumferences, seamWidth, zones, detentsOpt, routeOpt
     detents,
     route,
   };
+
+  // 安装误差分析（可选，独立于原有结果）：复用共用安全段收缩出可靠角度段
+  const tolCfg = parseTolerance(toleranceOpt);
+  if (tolCfg.enabled) {
+    const rel = computeReliableArcs(common, tolCfg.ccwDeg, tolCfg.cwDeg);
+    // 落在可靠段内（含边界/单点）的档位；可靠段为空与“有段无档位”分别标记
+    let tolDetents = null;
+    if (detentCfg.enabled) {
+      const available = (detents.available || []).filter((d) =>
+        degInReliable(rel.arcs, d.deg)
+      );
+      tolDetents = {
+        available,
+        noAvailable: !rel.empty && available.length === 0,
+      };
+    }
+    result.tolerance = {
+      ccwDeg: tolCfg.ccwDeg,
+      cwDeg: tolCfg.cwDeg,
+      totalDeg: tolCfg.ccwDeg + tolCfg.cwDeg,
+      full: rel.full,
+      empty: rel.empty,
+      arcs: rel.arcs,
+      detents: tolDetents,
+    };
+  }
+
+  return result;
 }
 
 module.exports = {

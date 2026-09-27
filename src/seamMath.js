@@ -14,6 +14,7 @@ const EPS = 1e-9;
 
 const { parseDetents, buildSingleDetents, circDistDeg, FULL: DEG_FULL } = require('./detents');
 const { planRoute } = require('./routePlan');
+const { parseTolerance, computeReliableArcs, degInReliable } = require('./tolerance');
 
 function mod(n, m) {
   return ((n % m) + m) % m;
@@ -147,6 +148,59 @@ function gapToFeasible(s, e, C) {
 }
 
 /**
+ * 单规格安装误差分析：由可行段（角度域）收缩出可靠角度段，
+ * 启用档位时列出落在可靠段内的全部档位。
+ * θ 可靠 ⟺ 从 θ−ccwDeg 到 θ+cwDeg 的整条正向圆弧均安全（含边界）。
+ */
+function buildSingleTolerance(tolCfg, feasible, C, detentCfg, detents) {
+  const arcs = feasible.map((f) => ({
+    startDeg: f.startDeg,
+    endDeg: f.endDeg,
+    wraps: f.wraps,
+    widthDeg: f.widthDeg,
+    full: !!f.full,
+  }));
+  const rel = computeReliableArcs(arcs, tolCfg.ccwDeg, tolCfg.cwDeg);
+  const degToMm = (deg) => (deg / 360) * C;
+  const outArcs = rel.arcs.map((a) => {
+    const view = {
+      startMm: degToMm(a.startDeg),
+      endMm: degToMm(a.endDeg),
+      startDeg: a.startDeg,
+      endDeg: a.endDeg,
+      widthMm: degToMm(a.widthDeg),
+      widthDeg: a.widthDeg,
+      wraps: a.wraps,
+    };
+    if (a.full) view.full = true;
+    if (a.point) view.point = true;
+    return view;
+  });
+
+  // 落在可靠段内（含边界/单点）的档位；可靠段为空与“有段无档位”分别标记
+  let tolDetents = null;
+  if (detentCfg.enabled) {
+    const available = (detents.available || []).filter((d) =>
+      degInReliable(rel.arcs, d.deg)
+    );
+    tolDetents = {
+      available,
+      noAvailable: !rel.empty && available.length === 0,
+    };
+  }
+
+  return {
+    ccwDeg: tolCfg.ccwDeg,
+    cwDeg: tolCfg.cwDeg,
+    totalDeg: tolCfg.ccwDeg + tolCfg.cwDeg,
+    full: rel.full,
+    empty: rel.empty,
+    arcs: outArcs,
+    detents: tolDetents,
+  };
+}
+
+/**
  * 主入口。
  * @param {number} C 周长 (mm)，> 0
  * @param {number} W 接缝安全宽度 (mm)，>= 0
@@ -155,8 +209,10 @@ function gapToFeasible(s, e, C) {
  *        {enabled:boolean, steps?:2～360 整数, offsetDeg?:number}
  * @param {object} [routeOpt] 调机旋转路径 {fromDeg, toDeg}（角度，按整圈归一）；
  *        基于可行段（启用档位时还要求两端落在可用档位上）规划单向连续旋转路径
+ * @param {object} [toleranceOpt] 安装误差 {ccwDeg, cwDeg}（非负有限角度）；
+ *        给出时基于可行段输出可靠角度段；缺省时响应不含 tolerance 字段
  */
-function computeSeamAvoidance(C, W, zones, detentsOpt, routeOpt) {
+function computeSeamAvoidance(C, W, zones, detentsOpt, routeOpt, toleranceOpt) {
   const zonePieces = [];
   const rawForbidden = [];
   for (const z of zones) {
@@ -255,7 +311,7 @@ function computeSeamAvoidance(C, W, zones, detentsOpt, routeOpt) {
     );
   }
 
-  return {
+  const result = {
     circumference: C,
     seamWidth: W,
     seamWidthDeg: mmToDeg(W, C),
@@ -273,6 +329,14 @@ function computeSeamAvoidance(C, W, zones, detentsOpt, routeOpt) {
     route,
     coveragePct: Math.min(100, (coveredMm / C) * 100),
   };
+
+  // 安装误差分析（可选，独立于原有结果）：复用可行段收缩出可靠角度段
+  const tolCfg = parseTolerance(toleranceOpt);
+  if (tolCfg.enabled) {
+    result.tolerance = buildSingleTolerance(tolCfg, feasible, C, detentCfg, detents);
+  }
+
+  return result;
 }
 
 module.exports = {

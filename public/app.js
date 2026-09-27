@@ -122,6 +122,44 @@ function updateDetentsUI() {
   $('detentsFields').hidden = !enabled;
 }
 
+/** 读取安装误差参数；未启用返回 null（请求不带 tolerance，响应保持原样）。 */
+function readTolerance() {
+  if (!$('toleranceEnabled').checked) return null;
+  const ccwRaw = $('tolCcw').value.trim();
+  const cwRaw = $('tolCw').value.trim();
+  return {
+    ccwDeg: ccwRaw === '' ? 0 : parseFloat(ccwRaw),
+    cwDeg: cwRaw === '' ? 0 : parseFloat(cwRaw),
+  };
+}
+
+/** 安装误差参数的前端校验，返回错误信息或 null。 */
+function validateToleranceInput(t) {
+  if (!t) return null;
+  if (!Number.isFinite(t.ccwDeg) || t.ccwDeg < 0) {
+    return '逆时针误差必须为不小于 0 的数值（°）';
+  }
+  if (!Number.isFinite(t.cwDeg) || t.cwDeg < 0) {
+    return '顺时针误差必须为不小于 0 的数值（°）';
+  }
+  return null;
+}
+
+/** 将安装误差参数写回表单（载入快照时使用）。 */
+function fillTolerance(t) {
+  const enabled = !!(t && Number.isFinite(t.ccwDeg) && Number.isFinite(t.cwDeg));
+  $('toleranceEnabled').checked = enabled;
+  if (enabled) {
+    $('tolCcw').value = t.ccwDeg;
+    $('tolCw').value = t.cwDeg;
+  }
+  updateToleranceUI();
+}
+
+function updateToleranceUI() {
+  $('toleranceFields').hidden = !$('toleranceEnabled').checked;
+}
+
 function readInputs() {
   const circumference = parseFloat($('circumference').value);
   const seamWidth = parseFloat($('seamWidth').value);
@@ -216,6 +254,10 @@ async function compute() {
   const route = readRoute();
   if (route && route.error) return showError(route.error);
   if (route) body.route = route;
+  const tolerance = readTolerance();
+  const toleranceError = validateToleranceInput(tolerance);
+  if (toleranceError) return showError(toleranceError);
+  if (tolerance) body.tolerance = tolerance;
 
   let result;
   try {
@@ -260,6 +302,10 @@ async function computeMulti() {
   const route = readRoute();
   if (route && route.error) return showError(route.error);
   if (route) body.route = route;
+  const tolerance = readTolerance();
+  const toleranceError = validateToleranceInput(tolerance);
+  if (toleranceError) return showError(toleranceError);
+  if (tolerance) body.tolerance = tolerance;
 
   let result;
   try {
@@ -397,6 +443,88 @@ function renderNearestHtml(detents) {
   return parts.join('');
 }
 
+/* ---------------- 安装误差分析结果 ---------------- */
+
+/** 可靠段的文字描述（单规格附 mm）。 */
+function tolArcText(a, withMm) {
+  if (a.full) return '0.0° → 360.0°（整圈）';
+  if (a.point) {
+    return withMm
+      ? `仅单点 ${fmtDeg(a.startDeg)}°（${fmtMm(a.startMm)} mm）`
+      : `仅单点 ${fmtDeg(a.startDeg)}°`;
+  }
+  const range = `${fmtDeg(a.startDeg)}° → ${fmtDeg(a.endDeg)}°`;
+  const wrap = a.wraps ? '（跨零点）' : '';
+  return withMm ? `${range} ｜ ${fmtMm(a.startMm)} → ${fmtMm(a.endMm)} mm${wrap}` : range + wrap;
+}
+
+/**
+ * 渲染安装误差分析面板（单/多规格共用，独立于原结果展示）。
+ * @param {string} prefix 'single' | 'multi'
+ * @param {object|null|undefined} t 结果中的 tolerance；缺省（未传误差）时隐藏面板
+ * @param {boolean} withMm 单规格弧段附 mm 展示
+ */
+function renderTolerancePanel(prefix, t, withMm) {
+  const panel = $(prefix + 'TolerancePanel');
+  if (!t) {
+    panel.hidden = true;
+    return;
+  }
+  panel.hidden = false;
+  $(prefix + 'ToleranceInfo').textContent =
+    `逆时针 ${fmtDeg(t.ccwDeg)}° ＋ 顺时针 ${fmtDeg(t.cwDeg)}°（总宽 ${fmtDeg(t.totalDeg)}°）`;
+
+  const emptyBox = $(prefix + 'ToleranceEmpty');
+  const list = $(prefix + 'ToleranceList');
+  list.innerHTML = '';
+  if (t.empty) {
+    emptyBox.hidden = false;
+    emptyBox.textContent =
+      t.totalDeg >= 360 - 1e-9
+        ? '可靠段为空：误差总宽已达 360°，误差弧覆盖整圈，仅当整圈安全时才有可靠角度。'
+        : '可靠段为空：在该误差下没有任何标称角度能保证整条误差弧安全，请缩小两侧误差或调整参数。';
+  } else {
+    emptyBox.hidden = true;
+    emptyBox.textContent = '';
+    t.arcs.forEach((a, i) => {
+      const li = document.createElement('li');
+      li.className = 'feasible tol-arc';
+      const label = a.full ? '整圈' : a.point ? `点 ${i + 1}` : `段 ${i + 1}`;
+      li.innerHTML =
+        `<span>${label}：${tolArcText(a, withMm)}</span>` +
+        (a.point
+          ? '<span class="tag">收缩后仅剩单点</span>'
+          : `<span class="tag">宽 ${fmtDeg(a.widthDeg)}°</span>`);
+      list.appendChild(li);
+    });
+  }
+
+  // 落在可靠段内的全部档位；区分“可靠段为空”与“有段无档位”
+  const detBox = $(prefix + 'ToleranceDetents');
+  if (!t.detents) {
+    detBox.hidden = true;
+    detBox.innerHTML = '';
+    return;
+  }
+  detBox.hidden = false;
+  if (t.empty) {
+    detBox.innerHTML = '<div class="tol-note">可靠段为空，无可靠档位。</div>';
+  } else if (t.detents.noAvailable) {
+    detBox.innerHTML =
+      '<div class="tol-note warn">有可靠段，但没有任何档位落在可靠段内（含边界）。</div>';
+  } else {
+    const items = t.detents.available
+      .map((d) => {
+        const pos = withMm && d.mm !== undefined ? `（${fmtMm(d.mm)} mm）` : '';
+        return `<span class="tol-detent">第 ${d.index + 1} 档 ${fmtDeg(d.deg)}°${pos}</span>`;
+      })
+      .join('');
+    detBox.innerHTML =
+      `<div class="tol-note">落在可靠段内的档位（共 ${t.detents.available.length} 个）：</div>` +
+      `<div class="tol-detents-row">${items}</div>`;
+  }
+}
+
 /* ---------------- 结果渲染 ---------------- */
 
 function segText(s) {
@@ -456,6 +584,7 @@ function renderResults() {
   }
 
   renderSingleDetents();
+  renderTolerancePanel('single', r.tolerance, true);
 
   $('feasibleCount').textContent = r.noSolution ? '（无）' : `（共 ${r.feasible.length} 段）`;
   const fl = $('feasibleList');
@@ -686,6 +815,7 @@ function renderMultiResults() {
   }
   markActiveCommon();
   renderMultiDetents();
+  renderTolerancePanel('multi', r.tolerance, false);
 
   const sl = $('multiSpecList');
   sl.innerHTML = '';
@@ -791,6 +921,9 @@ function renderMultiLegend() {
   el.innerHTML =
     `<div class="lg-row">${items}</div>` +
     `<div class="lg-row"><span class="lg-item"><span class="lg-swatch common"></span>所有规格共用安全段</span>` +
+    (r.tolerance && !r.tolerance.empty
+      ? `<span class="lg-item"><span class="lg-swatch reliable"></span>可靠段（±误差）</span>`
+      : '') +
     (r.noSolution
       ? `<span class="lg-item"><span class="lg-swatch conflict"></span>冲突区间（首次归零）</span>` +
         (r.fallback ? `<span class="lg-item"><span class="lg-swatch fallback"></span>最小违约备选角度</span>` : '')
@@ -1113,6 +1246,26 @@ function drawSingle() {
     drawRingSegments(cx, cy, R, r.forbiddenMerged, C, '#d43a3a', 20);
   }
 
+  // 安装误差分析：可靠段叠加在可行/禁用环上（青色窄环），单点段画圆点
+  if (r.tolerance && !r.tolerance.empty) {
+    drawRingSegments(
+      cx, cy, R,
+      r.tolerance.arcs.filter((a) => !a.point),
+      C, '#0891b2', 8
+    );
+    for (const a of r.tolerance.arcs) {
+      if (!a.point) continue;
+      const ap = rad(a.startMm, C);
+      ctx.beginPath();
+      ctx.arc(cx + R * Math.cos(ap), cy + R * Math.sin(ap), 6, 0, TAU);
+      ctx.fillStyle = '#0891b2';
+      ctx.fill();
+      ctx.strokeStyle = '#fff';
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+    }
+  }
+
   // 设备档位刻度（环外）与“无可用档位”时的最近档位标记
   drawDetentTicks(ctx, cx, cy, r.detents, R);
   if (r.detents && r.detents.enabled && !r.noSolution && r.detents.noAvailable) {
@@ -1207,6 +1360,7 @@ function drawSingle() {
   let legend = r.noSolution
     ? [['#d43a3a', '禁用（覆盖整圈）'], ['#e8912d', '印刷保护区']]
     : [['#1e9e50', '可行'], ['#d43a3a', '禁用'], ['#e8912d', '印刷保护区'], ['#2563eb', '接缝']];
+  if (r.tolerance && !r.tolerance.empty) legend.push(['#0891b2', '可靠段(±误差)']);
   if (detentsOn && !r.noSolution) {
     legend.push(['#0f7a3d', '可用档位']);
     if (r.detents.noAvailable) legend.push(['#d97706', '最近档位']);
@@ -1336,6 +1490,26 @@ function drawMulti() {
   ctx.stroke();
   if (!r.noSolution) {
     drawDegreeRing(cx, cy, commonR, r.common, '#1e9e50', 14);
+  }
+
+  // 安装误差分析：可靠段叠加在共用安全段环上（青色窄环），单点段画圆点
+  if (r.tolerance && !r.tolerance.empty) {
+    drawDegreeRing(
+      cx, cy, commonR,
+      r.tolerance.arcs.filter((a) => !a.point),
+      '#0891b2', 6
+    );
+    for (const a of r.tolerance.arcs) {
+      if (!a.point) continue;
+      const ap = multiRadDeg(a.startDeg);
+      ctx.beginPath();
+      ctx.arc(cx + commonR * Math.cos(ap), cy + commonR * Math.sin(ap), 6, 0, TAU);
+      ctx.fillStyle = '#0891b2';
+      ctx.fill();
+      ctx.strokeStyle = '#fff';
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+    }
   }
 
   // 冲突区间（首次归零）：红虚线叠在共用环上
@@ -1697,6 +1871,7 @@ function loadSnapshot(id) {
   $('circumference').value = s.input.circumference;
   $('seamWidth').value = s.input.seamWidth;
   fillDetents(s.input.detents);
+  fillTolerance(s.input.tolerance);
   $('zones').innerHTML = '';
   for (const z of s.input.zones) addZoneRow(z.start, z.end);
   compute();
@@ -2042,6 +2217,12 @@ $('detentsEnabled').addEventListener('change', () => {
 });
 $('detentSteps').addEventListener('input', scheduleCompute);
 $('detentOffset').addEventListener('input', scheduleCompute);
+$('toleranceEnabled').addEventListener('change', () => {
+  updateToleranceUI();
+  scheduleCompute();
+});
+$('tolCcw').addEventListener('input', scheduleCompute);
+$('tolCw').addEventListener('input', scheduleCompute);
 $('routeFrom').addEventListener('input', scheduleCompute);
 $('routeTo').addEventListener('input', scheduleCompute);
 $('loadExample').addEventListener('click', () => {
@@ -2081,6 +2262,7 @@ renderSnapshotList();
 refreshSpecRows();
 updateSnapshotModeUI();
 updateDetentsUI();
+updateToleranceUI();
 updatePreviewHint();
 
 // 默认载入示例并计算

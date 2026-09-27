@@ -238,6 +238,41 @@ button.small { padding: 3px 10px; font-size: 12px; }
 }
 .detent-list .detent-row .md-gaps { margin-top: 2px; color: var(--muted); font-size: 11.5px; }
 
+/* ---------------- 安装误差分析 ---------------- */
+
+.tolerance-box { background: #f5fafb; }
+.tolerance-panel { margin-top: 4px; }
+.tolerance-panel .tol-arc { border-left-color: #0891b2; cursor: default; }
+.tolerance-panel .tol-arc:hover { background: #ecfeff; }
+.tol-empty {
+  background: #fef2f2;
+  border: 1px solid #fecaca;
+  color: #991b1b;
+  border-radius: 8px;
+  padding: 8px 10px;
+  font-size: 12.5px;
+  margin-bottom: 8px;
+}
+.tol-detents { margin-top: 8px; font-size: 12.5px; }
+.tol-detents .tol-note { color: var(--muted); margin-bottom: 5px; }
+.tol-detents .tol-note.warn {
+  background: #fffbeb;
+  border: 1px solid #fcd34d;
+  color: #92400e;
+  border-radius: 6px;
+  padding: 6px 8px;
+}
+.tol-detents-row { display: flex; flex-wrap: wrap; gap: 5px; }
+.tol-detent {
+  border: 1px solid #a5f3fc;
+  background: #ecfeff;
+  color: #155e75;
+  border-radius: 999px;
+  padding: 2px 9px;
+  font-size: 12px;
+}
+.multi-legend .lg-swatch.reliable { background: #0891b2; }
+
 
 .spec-row {
   display: flex;
