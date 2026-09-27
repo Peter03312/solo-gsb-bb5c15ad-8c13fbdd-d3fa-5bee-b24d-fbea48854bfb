@@ -58,6 +58,20 @@ function validateRoute(route) {
   return null;
 }
 
+/** 校验安装误差参数，返回错误信息或 null。 */
+function validateTolerance(tolerance) {
+  if (tolerance === undefined || tolerance === null) return null;
+  if (typeof tolerance !== 'object' || Array.isArray(tolerance)) {
+    return 'tolerance 必须为对象，如 {ccwDeg:2, cwDeg:3}';
+  }
+  for (const key of ['ccwDeg', 'cwDeg']) {
+    if (!isFiniteNumber(tolerance[key]) || tolerance[key] < 0) {
+      return `tolerance.${key} 必须为不小于 0 的有限角度（°）`;
+    }
+  }
+  return null;
+}
+
 /** 校验共用的接缝宽度与保护区，返回错误信息或 null。 */
 function validateSharedInput(seamWidth, zones) {
   if (!isFiniteNumber(seamWidth) || seamWidth < 0) {
@@ -76,7 +90,7 @@ function validateSharedInput(seamWidth, zones) {
 
 app.post('/api/compute', (req, res) => {
   const body = req.body || {};
-  const { circumference, seamWidth, zones, detents, route } = body;
+  const { circumference, seamWidth, zones, detents, route, tolerance } = body;
 
   if (!isFiniteNumber(circumference) || circumference <= 0) {
     return res.status(400).json({ error: 'circumference 必须为大于 0 的数值 (mm)' });
@@ -87,9 +101,11 @@ app.post('/api/compute', (req, res) => {
   if (detentsError) return res.status(400).json({ error: detentsError });
   const routeError = validateRoute(route);
   if (routeError) return res.status(400).json({ error: routeError });
+  const toleranceError = validateTolerance(tolerance);
+  if (toleranceError) return res.status(400).json({ error: toleranceError });
 
   try {
-    const result = computeSeamAvoidance(circumference, seamWidth, zones, detents, route);
+    const result = computeSeamAvoidance(circumference, seamWidth, zones, detents, route, tolerance);
     res.json(result);
   } catch (e) {
     return res.status(400).json({ error: e.message });
@@ -98,7 +114,7 @@ app.post('/api/compute', (req, res) => {
 
 app.post('/api/compute-multi', (req, res) => {
   const body = req.body || {};
-  const { circumferences, seamWidth, zones, detents, route } = body;
+  const { circumferences, seamWidth, zones, detents, route, tolerance } = body;
 
   if (
     !Array.isArray(circumferences) ||
@@ -120,9 +136,11 @@ app.post('/api/compute-multi', (req, res) => {
   if (detentsError) return res.status(400).json({ error: detentsError });
   const routeError = validateRoute(route);
   if (routeError) return res.status(400).json({ error: routeError });
+  const toleranceError = validateTolerance(tolerance);
+  if (toleranceError) return res.status(400).json({ error: toleranceError });
 
   try {
-    const result = computeMultiSpec(circumferences, seamWidth, zones, detents, route);
+    const result = computeMultiSpec(circumferences, seamWidth, zones, detents, route, tolerance);
     res.json(result);
   } catch (e) {
     return res.status(400).json({ error: e.message });

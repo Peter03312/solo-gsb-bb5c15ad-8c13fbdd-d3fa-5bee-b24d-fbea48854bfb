@@ -14,6 +14,7 @@ const EPS = 1e-9;
 
 const { parseDetents, buildSingleDetents, circDistDeg, FULL: DEG_FULL } = require('./detents');
 const { planRoute } = require('./routePlan');
+const { parseTolerance, buildToleranceAnalysis } = require('./tolerance');
 
 function mod(n, m) {
   return ((n % m) + m) % m;
@@ -155,8 +156,10 @@ function gapToFeasible(s, e, C) {
  *        {enabled:boolean, steps?:2～360 整数, offsetDeg?:number}
  * @param {object} [routeOpt] 调机旋转路径 {fromDeg, toDeg}（角度，按整圈归一）；
  *        基于可行段（启用档位时还要求两端落在可用档位上）规划单向连续旋转路径
+ * @param {object} [toleranceOpt] 安装误差 {ccwDeg, cwDeg}（非负角度）；
+ *        基于可行段内缩得到可靠标称角度段，随结果以 tolerance 字段返回
  */
-function computeSeamAvoidance(C, W, zones, detentsOpt, routeOpt) {
+function computeSeamAvoidance(C, W, zones, detentsOpt, routeOpt, toleranceOpt) {
   const zonePieces = [];
   const rawForbidden = [];
   for (const z of zones) {
@@ -255,7 +258,27 @@ function computeSeamAvoidance(C, W, zones, detentsOpt, routeOpt) {
     );
   }
 
-  return {
+  // 安装误差分析（可选）：可行段两端分别内缩 ccwDeg/cwDeg 得到可靠标称角度段
+  const tolCfg = parseTolerance(toleranceOpt);
+  let tolerance = null;
+  if (tolCfg) {
+    const degToMm = (deg) => (deg / DEG_FULL) * C;
+    tolerance = buildToleranceAnalysis(
+      tolCfg,
+      feasible,
+      detentCfg.enabled ? detentCfg : null
+    );
+    for (const a of tolerance.reliable) {
+      a.startMm = degToMm(a.startDeg);
+      a.endMm = a.full ? 0 : degToMm(a.endDeg);
+      a.widthMm = degToMm(a.widthDeg);
+    }
+    if (tolerance.detents.enabled) {
+      for (const d of tolerance.detents.available) d.mm = degToMm(d.deg);
+    }
+  }
+
+  const result = {
     circumference: C,
     seamWidth: W,
     seamWidthDeg: mmToDeg(W, C),
@@ -273,6 +296,9 @@ function computeSeamAvoidance(C, W, zones, detentsOpt, routeOpt) {
     route,
     coveragePct: Math.min(100, (coveredMm / C) * 100),
   };
+  // 未传安装误差时保持原响应（不附加 tolerance 字段）
+  if (tolerance) result.tolerance = tolerance;
+  return result;
 }
 
 module.exports = {

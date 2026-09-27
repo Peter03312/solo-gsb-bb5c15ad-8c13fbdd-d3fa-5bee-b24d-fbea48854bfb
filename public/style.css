@@ -201,6 +201,12 @@ button.small { padding: 3px 10px; font-size: 12px; }
 }
 #detentsHint { margin: 7px 0 0; }
 
+/* ---------------- 安装误差分析 ---------------- */
+
+.tolerance-box { margin-top: 10px; }
+.seg-list li.reliable { border-left-color: #0891b2; cursor: default; }
+.seg-list li.reliable:hover { background: #ecfeff; }
+
 .detent-warn {
   background: #fffbeb;
   border: 1px solid #fcd34d;

@@ -47,6 +47,10 @@
         seamWidth: input.seamWidth,
         zones: (input.zones || []).map((z) => ({ start: z.start, end: z.end })),
         detents: input.detents || { enabled: false },
+        // 安装误差分析参数（未启用时不保存，载入时按未启用处理）
+        ...(input.tolerance
+          ? { tolerance: { ccwDeg: input.tolerance.ccwDeg, cwDeg: input.tolerance.cwDeg } }
+          : {}),
       },
       result,
     };

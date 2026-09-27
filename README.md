@@ -33,6 +33,16 @@
 - 跨 0°、整圈可行、起终点相同（转角 0°）均正确处理；两端各自安全但被禁用段隔开时报告**不可达**；端点不在安全段内、不在可用档位上时**分别指出**。
 - 页面显示**方向**与**转角**，并在 Canvas 上以紫色路径弧（带箭头，叠在可行/共用环上）标出，from 空心点、to 实心点；不可达时端点标红。任何参数重算后路径结果**同步刷新**。
 
+## 安装误差分析
+
+在参数面板勾选「启用安装误差分析」并填写**逆时针误差**与**顺时针误差**（°，均须为不小于 0 的数值；单/多规格共用）：
+
+- **可靠判定**：标称角度 θ 可靠，当且仅当从 **θ−逆时针误差** 到 **θ+顺时针误差** 的整条正向圆弧均落在安全角度内（**含边界**）。等价地，系统把每条安全弧的起点侧内缩逆时针误差、终点侧内缩顺时针误差，剩余部分即为**可靠角度段**。
+- 分析**复用现有结果**：单规格基于**可行段**、多规格基于**共用安全段**，在右栏独立面板中列出全部可靠角度段，并在 Canvas 上以**青色**叠加在可行/共用环上；任何参数变化后分析**同步刷新**。
+- 边界情形：**跨零点**的可靠段正确标注；**整圈安全**时任意标称角度均可靠（整圈可靠）；安全弧内缩后**仅剩一个点**时该点仍可靠（单点段，宽 0°）；**误差总宽达到 360°** 时误差弧覆盖整圈，**仅整圈安全有解**，否则可靠段为空。
+- **启用设备档位约束**时，面板同时列出**落在可靠段内的全部档位**（单点段上的档位也算），并明确区分**可靠段为空**与**有可靠段但无档位落入**两种情形。
+- 未启用（未传误差）时接口响应与此前完全一致，不附加任何字段；误差非法（负值、非数值、缺字段、非对象）时两个计算接口均返回 **400**。
+
 ## 方案快照
 
 - 在「方案快照」面板可为**当前周长、接缝宽度、保护区与设备档位设置的计算结果**命名并保存；快照按时间倒序列出，支持载入参数（含档位开关、档位数与偏移）与删除。
@@ -78,8 +88,8 @@ docker compose down
 
 | 方法 & 路径 | 说明 |
 | ----------- | ---- |
-| `POST /api/compute` | 单规格计算。请求体：`{circumference, seamWidth, zones:[{start,end}], detents?, route?}`（单位 mm） |
-| `POST /api/compute-multi` | 多规格共用角度。请求体：`{circumferences:[…2～8 个周长…], seamWidth, zones, detents?, route?}`；返回每个规格的完整单规格结果（`specs[].result`）、圆周交集 `common`（角度弧段）、默认角度 `best.deg` 及各规格间隙 `best.gaps`；无共同解时 `noSolution=true` 并给出 `blocker`（首次归零的规格序号、此前公共段 `priorCommon`、该规格禁用段 `blockingForbidden` 与冲突区间 `conflictSegments`）与最小违约备选 `fallback`（见下） |
+| `POST /api/compute` | 单规格计算。请求体：`{circumference, seamWidth, zones:[{start,end}], detents?, route?, tolerance?}`（单位 mm） |
+| `POST /api/compute-multi` | 多规格共用角度。请求体：`{circumferences:[…2～8 个周长…], seamWidth, zones, detents?, route?, tolerance?}`；返回每个规格的完整单规格结果（`specs[].result`）、圆周交集 `common`（角度弧段）、默认角度 `best.deg` 及各规格间隙 `best.gaps`；无共同解时 `noSolution=true` 并给出 `blocker`（首次归零的规格序号、此前公共段 `priorCommon`、该规格禁用段 `blockingForbidden` 与冲突区间 `conflictSegments`）与最小违约备选 `fallback`（见下） |
 | `GET /api/health` | 健康检查 |
 
 `detents`（可选）为设备档位约束：`{enabled:true, steps:2～360 的整数, offsetDeg?:数值角度}`；缺省或 `enabled:false` 时行为不变（返回 `detents:{enabled:false}`）。启用后返回：
@@ -116,6 +126,20 @@ docker compose down
 | `best` | 所选路径 `{direction:'cw'/'ccw', directionLabel, sweepDeg, fromDeg, toDeg}`；可达方向中取转角较短者，等长（含起终点相同的 0°）取顺时针；不可达时为 `null` |
 
 `route` 参数非法（非对象、`fromDeg`/`toDeg` 非数值）时接口返回 400。
+
+### 安装误差分析 `tolerance`（两个计算接口均可选）
+
+请求体带 `tolerance:{ccwDeg, cwDeg}`（均为**非负有限角度**，°）时，返回中增加 `tolerance` 字段；**未传时响应保持原样（无此字段）**。标称角度 θ 可靠 ⟺ 从 θ−ccwDeg 到 θ+cwDeg 的整条正向圆弧均安全（含边界）；单规格基于可行段、多规格基于共用安全段内缩求得。字段：
+
+| 字段 | 说明 |
+| ---- | ---- |
+| `ccwDeg` / `cwDeg` / `totalDeg` | 两侧误差与总宽（°） |
+| `reliable[]` | 全部可靠角度段，沿用圆周弧表示约定（`{startDeg, endDeg, wraps, widthDeg}`，整圈可靠为 `full:true`）；**单点段**另标 `point:true`（`widthDeg:0`）；单规格结果另附 `startMm/endMm/widthMm` |
+| `reliableFull` | 是否整圈可靠（安全段整圈时任意标称角度均可靠，与误差大小无关） |
+| `reliableEmpty` | 可靠段是否为空；**误差总宽达到 360° 时仅整圈安全有解**，否则为空 |
+| `detents` | 未启用档位为 `{enabled:false}`；启用时为 `{enabled:true, available:[{index, deg, (mm)}], noAvailable}`：`available` 为落在可靠段内的全部档位（含边界与单点）；`noAvailable=true` 仅表示**有可靠段但无档位落入**，可靠段为空时保持 `false`（由 `reliableEmpty` 区分） |
+
+`tolerance` 参数非法（负值、非有限数值、缺字段、非对象）时接口返回 400。
 
 ### 最小违约备选 `fallback`（仅 `POST /api/compute-multi`）
 

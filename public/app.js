@@ -122,6 +122,32 @@ function updateDetentsUI() {
   $('detentsFields').hidden = !enabled;
 }
 
+/** 读取安装误差（单/多规格共用）；未启用返回 null，非法返回 {error}。 */
+function readTolerance() {
+  if (!$('toleranceEnabled').checked) return null;
+  const ccwDeg = parseFloat($('toleranceCcw').value);
+  const cwDeg = parseFloat($('toleranceCw').value);
+  if (!Number.isFinite(ccwDeg) || ccwDeg < 0 || !Number.isFinite(cwDeg) || cwDeg < 0) {
+    return { error: '安装误差必须为不小于 0 的数值（°）' };
+  }
+  return { ccwDeg, cwDeg };
+}
+
+/** 将安装误差参数写回表单（载入快照时使用）。 */
+function fillTolerance(t) {
+  const enabled = !!(t && Number.isFinite(t.ccwDeg) && Number.isFinite(t.cwDeg));
+  $('toleranceEnabled').checked = enabled;
+  if (enabled) {
+    $('toleranceCcw').value = t.ccwDeg;
+    $('toleranceCw').value = t.cwDeg;
+  }
+  updateToleranceUI();
+}
+
+function updateToleranceUI() {
+  $('toleranceFields').hidden = !$('toleranceEnabled').checked;
+}
+
 function readInputs() {
   const circumference = parseFloat($('circumference').value);
   const seamWidth = parseFloat($('seamWidth').value);
@@ -172,6 +198,7 @@ function setMode(mode) {
   refreshSpecRows();
   updateSnapshotModeUI();
   renderRoute();
+  renderTolerance();
   scheduleCompute();
 }
 
@@ -216,6 +243,9 @@ async function compute() {
   const route = readRoute();
   if (route && route.error) return showError(route.error);
   if (route) body.route = route;
+  const tolerance = readTolerance();
+  if (tolerance && tolerance.error) return showError(tolerance.error);
+  if (tolerance) body.tolerance = tolerance;
 
   let result;
   try {
@@ -236,6 +266,7 @@ async function compute() {
   if (result.best) state.thetaMm = result.best.mm;
   exitDiffMode();
   renderResults();
+  renderTolerance();
   renderRoute();
   draw();
 }
@@ -260,6 +291,9 @@ async function computeMulti() {
   const route = readRoute();
   if (route && route.error) return showError(route.error);
   if (route) body.route = route;
+  const tolerance = readTolerance();
+  if (tolerance && tolerance.error) return showError(tolerance.error);
+  if (tolerance) body.tolerance = tolerance;
 
   let result;
   try {
@@ -283,6 +317,7 @@ async function computeMulti() {
   }
   exitDiffMode();
   renderMultiResults();
+  renderTolerance();
   renderRoute();
   draw();
 }
@@ -338,6 +373,119 @@ function renderRoute() {
   };
   box.className = 'route-result ' + (route.status === 'off-detent' ? 'warn' : 'bad');
   box.innerHTML = `<strong>${labels[route.status] || '不可达'}：</strong>${route.reason}`;
+}
+
+/* ---------------- 安装误差分析结果 ---------------- */
+
+/** 当前模式下随计算结果返回的安装误差分析（未启用时为 null）。 */
+function currentTolerance() {
+  const r = state.mode === 'multi' ? state.multiResult : state.result;
+  return r && r.tolerance ? r.tolerance : null;
+}
+
+/** 可靠段弧的展示文本（单规格附毫米换算）。 */
+function reliableSegText(s, single) {
+  if (s.full) return '0.0° → 360.0°（整圈）';
+  if (s.point) {
+    const mm = single ? ` ｜ ${fmtMm(s.startMm)} mm` : '';
+    return `单点 ${fmtDeg(s.startDeg)}°${mm}（收缩为一点）`;
+  }
+  const range = `${fmtDeg(s.startDeg)}° → ${fmtDeg(s.endDeg)}°`;
+  const mm = single ? ` ｜ ${fmtMm(s.startMm)} → ${fmtMm(s.endMm)} mm` : '';
+  const wrap = s.wraps ? '（跨零点）' : '';
+  return `${range}${mm}${wrap}`;
+}
+
+function renderTolerance() {
+  const panel = $('tolerancePanel');
+  const t = currentTolerance();
+  if (!t) {
+    panel.hidden = true;
+    return;
+  }
+  panel.hidden = false;
+  const single = state.mode === 'single';
+
+  $('toleranceSummary').textContent =
+    `逆时针 ${fmtDeg(t.ccwDeg)}° ＋ 顺时针 ${fmtDeg(t.cwDeg)}°（总宽 ${fmtDeg(t.totalDeg)}°）`;
+
+  // 可靠段为空：区分“误差总宽达 360°”与一般收缩消失
+  const emptyBox = $('toleranceEmptyBox');
+  if (t.reliableEmpty) {
+    emptyBox.hidden = false;
+    emptyBox.innerHTML = t.totalDeg >= 360 - 1e-7
+      ? '<strong>可靠段为空：</strong>误差总宽达到 360°，仅整圈安全才有可靠角度；' +
+        '当前存在禁用区，任何标称角度的误差弧都会扫过它。'
+      : '<strong>可靠段为空：</strong>在当前安装误差下，没有任何标称角度的整条误差弧保持安全；' +
+        '请减小两侧误差或调整保护区/接缝宽度。';
+  } else {
+    emptyBox.hidden = true;
+    emptyBox.innerHTML = '';
+  }
+
+  // 可靠档位（启用设备档位约束时）：区分“可靠段为空”与“有段无档位”
+  const detPanel = $('toleranceDetentsPanel');
+  const detWarn = $('toleranceDetentWarnBox');
+  const detOn = !!(t.detents && t.detents.enabled);
+  detPanel.hidden = !detOn;
+  if (detOn) {
+    const d = t.detents;
+    $('toleranceDetentCount').textContent = t.reliableEmpty
+      ? '（可靠段为空，无可靠档位）'
+      : d.noAvailable
+        ? '（有可靠段，但无档位落入）'
+        : `（${d.available.length} 档落在可靠段内）`;
+    const ul = $('toleranceDetentList');
+    ul.innerHTML = '';
+    for (const item of d.available) {
+      const li = document.createElement('li');
+      li.className = 'detent-row';
+      const mm = single && item.mm !== undefined ? `（${fmtMm(item.mm)} mm）` : '';
+      li.innerHTML = `<span class="d-name">第 ${item.index + 1} 档：${fmtDeg(item.deg)}°${mm}</span>` +
+        `<span class="tag">可靠</span>`;
+      li.title = '点击将该可靠档位设为当前角度';
+      li.addEventListener('click', () => {
+        if (single) {
+          state.thetaMm = item.mm;
+          renderResults();
+        } else {
+          state.thetaDeg = item.deg;
+          renderMultiResults();
+        }
+        draw();
+      });
+      ul.appendChild(li);
+    }
+    if (!t.reliableEmpty && d.noAvailable) {
+      detWarn.hidden = false;
+      detWarn.innerHTML =
+        '<strong>可靠段非空，但没有任何档位落在可靠段内。</strong>' +
+        '可减小安装误差、增加档位数或调整零位偏移。';
+    } else {
+      detWarn.hidden = true;
+      detWarn.innerHTML = '';
+    }
+  } else {
+    detWarn.hidden = true;
+    detWarn.innerHTML = '';
+  }
+
+  // 可靠角度段列表
+  $('toleranceCount').textContent = t.reliableFull
+    ? '（整圈可靠）'
+    : t.reliableEmpty
+      ? '（无）'
+      : `（共 ${t.reliable.length} 段）`;
+  const ul = $('toleranceList');
+  ul.innerHTML = '';
+  t.reliable.forEach((s, i) => {
+    const li = document.createElement('li');
+    li.className = 'feasible reliable';
+    li.innerHTML = s.full
+      ? `<span>整圈可靠：任意标称角度均安全</span><span class="tag">宽 360.0°</span>`
+      : `<span>段 ${i + 1}：${reliableSegText(s, single)}</span><span class="tag">宽 ${fmtDeg(s.widthDeg)}°</span>`;
+    ul.appendChild(li);
+  });
 }
 
 /* ---------------- 档位结果辅助 ---------------- */
@@ -791,6 +939,9 @@ function renderMultiLegend() {
   el.innerHTML =
     `<div class="lg-row">${items}</div>` +
     `<div class="lg-row"><span class="lg-item"><span class="lg-swatch common"></span>所有规格共用安全段</span>` +
+    (r.tolerance && !r.noSolution
+      ? `<span class="lg-item"><span class="lg-swatch" style="background:#0891b2"></span>可靠段（安装误差内）</span>`
+      : '') +
     (r.noSolution
       ? `<span class="lg-item"><span class="lg-swatch conflict"></span>冲突区间（首次归零）</span>` +
         (r.fallback ? `<span class="lg-item"><span class="lg-swatch fallback"></span>最小违约备选角度</span>` : '')
@@ -1111,6 +1262,18 @@ function drawSingle() {
   } else {
     drawRingSegments(cx, cy, R, r.feasible, C, '#1e9e50', 20);
     drawRingSegments(cx, cy, R, r.forbiddenMerged, C, '#d43a3a', 20);
+    // 安装误差分析：可靠段叠加在可行环上（青色），单点段画圆点
+    if (r.tolerance) {
+      drawRingSegments(cx, cy, R, r.tolerance.reliable.filter((a) => !a.point), C, '#0891b2', 9);
+      for (const a of r.tolerance.reliable) {
+        if (!a.point) continue;
+        const ap = rad(a.startMm, C);
+        ctx.fillStyle = '#0891b2';
+        ctx.beginPath();
+        ctx.arc(cx + R * Math.cos(ap), cy + R * Math.sin(ap), 7, 0, TAU);
+        ctx.fill();
+      }
+    }
   }
 
   // 设备档位刻度（环外）与“无可用档位”时的最近档位标记
@@ -1207,6 +1370,7 @@ function drawSingle() {
   let legend = r.noSolution
     ? [['#d43a3a', '禁用（覆盖整圈）'], ['#e8912d', '印刷保护区']]
     : [['#1e9e50', '可行'], ['#d43a3a', '禁用'], ['#e8912d', '印刷保护区'], ['#2563eb', '接缝']];
+  if (r.tolerance && !r.noSolution) legend.push(['#0891b2', '可靠段（误差内）']);
   if (detentsOn && !r.noSolution) {
     legend.push(['#0f7a3d', '可用档位']);
     if (r.detents.noAvailable) legend.push(['#d97706', '最近档位']);
@@ -1336,6 +1500,18 @@ function drawMulti() {
   ctx.stroke();
   if (!r.noSolution) {
     drawDegreeRing(cx, cy, commonR, r.common, '#1e9e50', 14);
+    // 安装误差分析：可靠段叠加在共用环上（青色），单点段画圆点
+    if (r.tolerance) {
+      drawDegreeRing(cx, cy, commonR, r.tolerance.reliable, '#0891b2', 6);
+      for (const a of r.tolerance.reliable) {
+        if (!a.point) continue;
+        const ap = multiRadDeg(a.startDeg);
+        ctx.fillStyle = '#0891b2';
+        ctx.beginPath();
+        ctx.arc(cx + commonR * Math.cos(ap), cy + commonR * Math.sin(ap), 6, 0, TAU);
+        ctx.fill();
+      }
+    }
   }
 
   // 冲突区间（首次归零）：红虚线叠在共用环上
@@ -1591,7 +1767,10 @@ function snapshotMetaText(s) {
   const noSol = s.result && s.result.noSolution ? ' · 无解' : '';
   const det =
     i.detents && i.detents.enabled ? ` · ${i.detents.steps} 档/偏移 ${fmtDeg(i.detents.offsetDeg)}°` : '';
-  return `${fmtTime(s.createdAt)} ｜ C=${fmtMm(i.circumference)} W=${fmtMm(i.seamWidth)} mm ｜ ${zones}${det}${noSol}`;
+  const tol = i.tolerance
+    ? ` · 误差 −${fmtDeg(i.tolerance.ccwDeg)}°/+${fmtDeg(i.tolerance.cwDeg)}°`
+    : '';
+  return `${fmtTime(s.createdAt)} ｜ C=${fmtMm(i.circumference)} W=${fmtMm(i.seamWidth)} mm ｜ ${zones}${det}${tol}${noSol}`;
 }
 
 function renderSnapshotList() {
@@ -1697,6 +1876,7 @@ function loadSnapshot(id) {
   $('circumference').value = s.input.circumference;
   $('seamWidth').value = s.input.seamWidth;
   fillDetents(s.input.detents);
+  fillTolerance(s.input.tolerance);
   $('zones').innerHTML = '';
   for (const z of s.input.zones) addZoneRow(z.start, z.end);
   compute();
@@ -2042,6 +2222,12 @@ $('detentsEnabled').addEventListener('change', () => {
 });
 $('detentSteps').addEventListener('input', scheduleCompute);
 $('detentOffset').addEventListener('input', scheduleCompute);
+$('toleranceEnabled').addEventListener('change', () => {
+  updateToleranceUI();
+  scheduleCompute();
+});
+$('toleranceCcw').addEventListener('input', scheduleCompute);
+$('toleranceCw').addEventListener('input', scheduleCompute);
 $('routeFrom').addEventListener('input', scheduleCompute);
 $('routeTo').addEventListener('input', scheduleCompute);
 $('loadExample').addEventListener('click', () => {
@@ -2081,6 +2267,7 @@ renderSnapshotList();
 refreshSpecRows();
 updateSnapshotModeUI();
 updateDetentsUI();
+updateToleranceUI();
 updatePreviewHint();
 
 // 默认载入示例并计算

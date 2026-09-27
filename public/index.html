@@ -55,6 +55,22 @@
           <p class="hint" id="detentsHint">启用后仅允许“偏移 + n×360°/档位数”的角度，单/多规格共用此约束</p>
         </div>
 
+        <div class="detents-box tolerance-box">
+          <label class="detents-toggle">
+            <input id="toleranceEnabled" type="checkbox" />
+            <span>启用安装误差分析</span>
+          </label>
+          <div id="toleranceFields" class="detents-fields" hidden>
+            <label>逆时针误差 (°)
+              <input id="toleranceCcw" type="number" min="0" step="any" value="0" />
+            </label>
+            <label>顺时针误差 (°)
+              <input id="toleranceCw" type="number" min="0" step="any" value="0" />
+            </label>
+          </div>
+          <p class="hint">标称角度 θ 可靠 ⟺ 从 θ−逆时针误差 到 θ+顺时针误差 的整条正向圆弧均安全（含边界）；单/多规格共用</p>
+        </div>
+
         <h3>印刷保护区 (mm)<button id="addZone" type="button" class="small">+ 添加</button></h3>
         <div id="zones"></div>
 
@@ -143,6 +159,18 @@
         <ul id="commonList" class="seg-list"></ul>
         <h3>各规格概览</h3>
         <ul id="multiSpecList" class="multi-spec-list"></ul>
+      </section>
+
+      <section class="panel tolerance-panel" id="tolerancePanel" hidden>
+        <h2>安装误差分析 <span id="toleranceSummary" class="hint"></span></h2>
+        <div id="toleranceEmptyBox" class="no-solution" hidden></div>
+        <div id="toleranceDetentWarnBox" class="detent-warn" hidden></div>
+        <div id="toleranceDetentsPanel" class="detents-panel" hidden>
+          <h3>可靠档位 <span id="toleranceDetentCount" class="hint"></span></h3>
+          <ul id="toleranceDetentList" class="detent-list"></ul>
+        </div>
+        <h3>可靠角度段 <span id="toleranceCount" class="hint"></span></h3>
+        <ul id="toleranceList" class="seg-list"></ul>
       </section>
 
       <section class="panel diff-panel" id="diffListPanel" hidden>

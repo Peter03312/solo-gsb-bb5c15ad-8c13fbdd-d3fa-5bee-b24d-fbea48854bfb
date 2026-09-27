@@ -26,6 +26,7 @@
 const { computeSeamAvoidance } = require('./seamMath');
 const { parseDetents, analyzeDetents, detentPositions } = require('./detents');
 const { planRoute } = require('./routePlan');
+const { parseTolerance, buildToleranceAnalysis } = require('./tolerance');
 
 const FULL = 360;
 const EPS = 1e-7; // 角度比较容差
@@ -468,8 +469,10 @@ function computeMinViolationFallback(specs, forbiddenSets, detentCfg, blocker) {
  *        {enabled:boolean, steps?:2～360 整数, offsetDeg?:number}
  * @param {object} [routeOpt] 调机旋转路径 {fromDeg, toDeg}（角度，按整圈归一）；
  *        基于共用安全段（启用档位时还要求两端落在可用档位上）规划单向连续旋转路径
+ * @param {object} [toleranceOpt] 安装误差 {ccwDeg, cwDeg}（非负角度）；
+ *        基于共用安全段内缩得到可靠标称角度段，随结果以 tolerance 字段返回
  */
-function computeMultiSpec(circumferences, seamWidth, zones, detentsOpt, routeOpt) {
+function computeMultiSpec(circumferences, seamWidth, zones, detentsOpt, routeOpt, toleranceOpt) {
   if (
     !Array.isArray(circumferences) ||
     circumferences.length < MIN_SPECS ||
@@ -641,7 +644,13 @@ function computeMultiSpec(circumferences, seamWidth, zones, detentsOpt, routeOpt
     );
   }
 
-  return {
+  // 安装误差分析（可选）：共用安全段两端分别内缩 ccwDeg/cwDeg 得到可靠标称角度段
+  const tolCfg = parseTolerance(toleranceOpt);
+  const tolerance = tolCfg
+    ? buildToleranceAnalysis(tolCfg, common, detentCfg.enabled ? detentCfg : null)
+    : null;
+
+  const result = {
     mode: 'multi',
     seamWidth,
     specs,
@@ -654,6 +663,9 @@ function computeMultiSpec(circumferences, seamWidth, zones, detentsOpt, routeOpt
     detents,
     route,
   };
+  // 未传安装误差时保持原响应（不附加 tolerance 字段）
+  if (tolerance) result.tolerance = tolerance;
+  return result;
 }
 
 module.exports = {
